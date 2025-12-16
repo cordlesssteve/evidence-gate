@@ -6,9 +6,9 @@
 
 ## Current State
 
-**Project Maturity:** Level 1 (Functional - Isolated Testing)
+**Project Maturity:** Level 2 (Validated - Real-World Testing)
 
-Core functionality implemented and tested. Ready for integration testing.
+Core functionality implemented, tested with 40 unit tests, and validated with real benchmark data from MonkeTree.
 
 ### What Exists
 - [x] PROJECT_CHARTER.md - Foundational vision document
@@ -25,14 +25,16 @@ Core functionality implemented and tested. Ready for integration testing.
 | `compareConditions()` | ✅ Complete | Main API, three-gate framework |
 | `welchTTest()` | ✅ Complete | Verified against statistical tables |
 | `mannWhitneyU()` | ✅ Complete | Non-parametric alternative |
-| `shapiroWilkTest()` | ⚠️ Functional | W values need verification |
-| `detectOutliers()` | ✅ Complete | Z-score method with masking note |
+| `shapiroWilkTest()` | ✅ Complete | Fixed with tabulated coefficients |
+| `detectOutliers()` | ✅ Complete | Z-score method |
+| `detectOutliersIQR()` | ✅ Complete | Robust IQR method (NEW) |
+| `detectOutliersCombined()` | ✅ Complete | Both methods with recommendation |
 | `runDiagnostics()` | ✅ Complete | Combined quality assessment |
 
-### Known Issues
-- Shapiro-Wilk W statistic may exceed valid range (0-1) in some cases
-- Z-score outlier detection has masking issues with extreme outliers
-- These are documented and tests account for them
+### Integration Validated
+- Successfully linked to MonkeTree via `npm link`
+- Tested with real benchmark data (navigate vs reload times)
+- All verification checks passed
 
 ---
 
@@ -59,12 +61,16 @@ The code to extract lives in MonkeTree:
 5. ~~Create public API~~ ✅
 6. ~~Add Mann-Whitney U~~ ✅
 
-### Remaining for v0.1.0
-- [ ] Fix Shapiro-Wilk W calculation (optional - works for decision-making)
-- [ ] Add more edge case tests
-- [ ] Consider IQR-based outlier detection as alternative
-- [ ] Create GitHub repo
-- [ ] Publish to npm
+### Completed for v0.1.0
+- [x] Fix Shapiro-Wilk W calculation (tabulated coefficients)
+- [x] Add IQR-based outlier detection
+- [x] Create GitHub repo: https://github.com/cordlesssteve/evidence-gate
+- [x] Integration test with MonkeTree
+
+### Remaining
+- [x] Publish to npm: https://www.npmjs.com/package/@cordlesssteve/evidence-gate
+
+**v0.1.0 Released!**
 
 ---
 
