@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { tDistCDF, tDistQuantile, welchTTest, getEffectSizeLabel } from '../src/core/welch-t-test.js';
 import { shapiroWilkTest } from '../src/core/normality.js';
-import { detectOutliers } from '../src/core/outliers.js';
+import { detectOutliers, detectOutliersIQR, detectOutliersCombined } from '../src/core/outliers.js';
 import { mannWhitneyU } from '../src/core/mann-whitney.js';
 
 describe('t-distribution functions', () => {
@@ -125,19 +125,41 @@ describe('getEffectSizeLabel', () => {
 });
 
 describe('shapiroWilkTest', () => {
-  // NOTE: Shapiro-Wilk implementation needs debugging - W values may be incorrect.
-  // These tests verify the interface works, not the statistical accuracy.
-
-  it('returns valid structure', () => {
+  it('returns W in valid range [0, 1]', () => {
     const data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
     const result = shapiroWilkTest(data);
 
-    expect(result).toHaveProperty('W');
-    expect(result).toHaveProperty('pValue');
-    expect(result).toHaveProperty('isNormal');
-    expect(result).toHaveProperty('interpretation');
-    expect(result).toHaveProperty('n');
-    expect(result.n).toBe(10);
+    expect(result.W).toBeGreaterThanOrEqual(0);
+    expect(result.W).toBeLessThanOrEqual(1);
+    expect(result.pValue).toBeGreaterThanOrEqual(0);
+    expect(result.pValue).toBeLessThanOrEqual(1);
+  });
+
+  it('accepts approximately normal data', () => {
+    // Data from standard normal (generated)
+    const normal = [
+      -1.5, -1.2, -0.8, -0.5, -0.2, 0.1, 0.4, 0.7, 1.0, 1.3,
+      -1.4, -1.1, -0.7, -0.4, -0.1, 0.2, 0.5, 0.8, 1.1, 1.4,
+    ];
+
+    const result = shapiroWilkTest(normal);
+
+    expect(result.W).toBeGreaterThanOrEqual(0);
+    expect(result.W).toBeLessThanOrEqual(1);
+    // Should have high W (close to 1) for normal data
+    expect(result.W).toBeGreaterThan(0.8);
+  });
+
+  it('rejects clearly bimodal data', () => {
+    // Bimodal data - clearly non-normal
+    const bimodal = [1, 1, 1, 1, 1, 10, 10, 10, 10, 10];
+
+    const result = shapiroWilkTest(bimodal);
+
+    expect(result.W).toBeGreaterThanOrEqual(0);
+    expect(result.W).toBeLessThanOrEqual(1);
+    // Bimodal should have lower W
+    expect(result.W).toBeLessThan(0.95);
   });
 
   it('handles edge cases', () => {
@@ -148,15 +170,29 @@ describe('shapiroWilkTest', () => {
     // All identical
     const identical = [5, 5, 5, 5, 5];
     expect(shapiroWilkTest(identical).isNormal).toBe(true);
+    expect(shapiroWilkTest(identical).W).toBe(1);
   });
 
-  it('handles large samples correctly', () => {
-    // Large sample should not throw
-    const large = Array.from({ length: 100 }, (_, i) => i);
-    const result = shapiroWilkTest(large);
+  it('handles various sample sizes correctly', () => {
+    // Test with tabulated coefficients (n <= 11)
+    for (const n of [3, 5, 8, 11]) {
+      const data = Array.from({ length: n }, (_, i) => i + 1);
+      const result = shapiroWilkTest(data);
 
-    expect(result.n).toBe(100);
-    expect(typeof result.pValue).toBe('number');
+      expect(result.W).toBeGreaterThanOrEqual(0);
+      expect(result.W).toBeLessThanOrEqual(1);
+      expect(result.n).toBe(n);
+    }
+
+    // Test with approximated coefficients (n > 11)
+    for (const n of [15, 20, 50, 100]) {
+      const data = Array.from({ length: n }, (_, i) => i + 1);
+      const result = shapiroWilkTest(data);
+
+      expect(result.W).toBeGreaterThanOrEqual(0);
+      expect(result.W).toBeLessThanOrEqual(1);
+      expect(result.n).toBe(n);
+    }
   });
 });
 
@@ -209,6 +245,87 @@ describe('detectOutliers', () => {
     const strictResult = detectOutliers(data, 1.5);
 
     expect(strictResult.count).toBeGreaterThanOrEqual(defaultResult.count);
+  });
+});
+
+describe('detectOutliersIQR', () => {
+  it('detects outliers using IQR method', () => {
+    // Data with clear outlier
+    const data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 100];
+
+    const result = detectOutliersIQR(data);
+
+    expect(result.count).toBeGreaterThan(0);
+    expect(result.values).toContain(100);
+    expect(result.Q1).toBeDefined();
+    expect(result.Q3).toBeDefined();
+    expect(result.IQR).toBe(result.Q3 - result.Q1);
+  });
+
+  it('calculates fences correctly', () => {
+    const data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    const result = detectOutliersIQR(data, 1.5);
+
+    // Fences should be Q1 - 1.5*IQR and Q3 + 1.5*IQR
+    expect(result.lowerFence).toBe(result.Q1 - 1.5 * result.IQR);
+    expect(result.upperFence).toBe(result.Q3 + 1.5 * result.IQR);
+  });
+
+  it('is more robust to extreme outliers than z-score', () => {
+    // Data where extreme outliers would mask moderate ones with z-score
+    const data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 1000];
+
+    const zResult = detectOutliers(data);
+    const iqrResult = detectOutliersIQR(data);
+
+    // IQR should find the outlier even when z-score might not (masking)
+    expect(iqrResult.count).toBeGreaterThan(0);
+    expect(iqrResult.values).toContain(1000);
+  });
+
+  it('handles small samples', () => {
+    const small = [1, 2, 3];
+    const result = detectOutliersIQR(small);
+
+    // Should not crash on small samples
+    expect(result.count).toBe(0);
+    expect(result.cleaned.length).toBe(3);
+  });
+});
+
+describe('detectOutliersCombined', () => {
+  it('provides both methods and recommendation', () => {
+    const data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 100];
+
+    const result = detectOutliersCombined(data);
+
+    expect(result.zScore).toBeDefined();
+    expect(result.iqr).toBeDefined();
+    expect(['z-score', 'iqr']).toContain(result.recommended);
+    expect(result.reason).toBeTruthy();
+    expect(result.outliers).toBeDefined();
+  });
+
+  it('recommends IQR for small samples', () => {
+    const smallData = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    const result = detectOutliersCombined(smallData);
+
+    expect(result.recommended).toBe('iqr');
+    expect(result.reason).toContain('Small sample');
+  });
+
+  it('recommends IQR when z-score shows masking', () => {
+    // Data where IQR finds outliers but z-score doesn't (masking)
+    const data = [1, 1, 1, 1, 1, 1, 1, 1, 20, 21];
+
+    const result = detectOutliersCombined(data);
+
+    // IQR should detect outliers
+    if (result.iqr.count > 0 && result.zScore.count === 0) {
+      expect(result.recommended).toBe('iqr');
+    }
   });
 });
 

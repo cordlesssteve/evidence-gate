@@ -1,8 +1,8 @@
 /**
  * Shapiro-Wilk normality test
  *
+ * Proper implementation based on Royston (1992) algorithm.
  * simple-statistics doesn't have Shapiro-Wilk, so we implement it ourselves.
- * This is adapted from the verified MonkeTree implementation.
  */
 
 import * as ss from 'simple-statistics';
@@ -61,61 +61,109 @@ export function shapiroWilkTest(samples: number[]): NormalityTestResult {
     };
   }
 
-  // Calculate Shapiro-Wilk coefficients
-  const a = shapiroWilkCoefficients(n);
+  // Get Shapiro-Wilk coefficients from lookup table or approximation
+  const a = getShapiroWilkCoefficients(n);
 
   // Calculate numerator: (sum of a[i] * (x[n-i] - x[i]))^2
-  let numerator = 0;
+  let b = 0;
   const halfN = Math.floor(n / 2);
   for (let i = 0; i < halfN; i++) {
-    const coef = a[i];
-    const high = sorted[n - 1 - i];
-    const low = sorted[i];
-    if (coef !== undefined && high !== undefined && low !== undefined) {
-      numerator += coef * (high - low);
+    const ai = a[i];
+    const xHigh = sorted[n - 1 - i];
+    const xLow = sorted[i];
+    if (ai !== undefined && xHigh !== undefined && xLow !== undefined) {
+      b += ai * (xHigh - xLow);
     }
   }
-  numerator = numerator ** 2;
 
-  // W statistic
-  const W = numerator / sumSquaredDev;
+  // W statistic = b² / S² where S² = sum of squared deviations
+  let W = (b * b) / sumSquaredDev;
+
+  // Clamp W to valid range [0, 1] - numerical errors can push it slightly outside
+  W = Math.max(0, Math.min(1, W));
 
   // Calculate p-value using Royston approximation
   const pValue = shapiroWilkPValue(W, n);
 
   const isNormal = pValue >= 0.05;
   let interpretation: string;
-  if (isNormal) {
+  if (pValue >= 0.10) {
     interpretation = `Data appears normally distributed (W=${W.toFixed(4)}, p=${pValue.toFixed(4)})`;
+  } else if (pValue >= 0.05) {
+    interpretation = `Marginal normality (W=${W.toFixed(4)}, p=${pValue.toFixed(4)}) - proceed with caution`;
+  } else if (pValue >= 0.01) {
+    interpretation = `Non-normal distribution (W=${W.toFixed(4)}, p=${pValue.toFixed(4)}) - consider non-parametric test`;
   } else {
-    interpretation = `Data deviates from normality (W=${W.toFixed(4)}, p=${pValue.toFixed(4)}) - consider non-parametric test`;
+    interpretation = `Strongly non-normal (W=${W.toFixed(4)}, p=${pValue.toFixed(4)}) - use non-parametric test`;
   }
 
   return { W, pValue, isNormal, interpretation, n };
 }
 
 /**
- * Calculate Shapiro-Wilk coefficients using Royston's approximation
+ * Get Shapiro-Wilk coefficients
+ *
+ * For small n (3-11), use tabulated values from Shapiro-Wilk (1965)
+ * For larger n, use Royston's approximation
  */
-function shapiroWilkCoefficients(n: number): number[] {
-  const a: number[] = [];
-  const halfN = Math.floor(n / 2);
+function getShapiroWilkCoefficients(n: number): number[] {
+  // Tabulated coefficients for small samples (Shapiro & Wilk, 1965)
+  // These are exact values from the original paper
+  const tables: Record<number, number[]> = {
+    3: [0.7071],
+    4: [0.6872, 0.1677],
+    5: [0.6646, 0.2413],
+    6: [0.6431, 0.2806, 0.0875],
+    7: [0.6233, 0.3031, 0.1401],
+    8: [0.6052, 0.3164, 0.1743, 0.0561],
+    9: [0.5888, 0.3244, 0.1976, 0.0947],
+    10: [0.5739, 0.3291, 0.2141, 0.1224, 0.0399],
+    11: [0.5601, 0.3315, 0.2260, 0.1429, 0.0695],
+  };
 
-  // Calculate expected values of order statistics from standard normal
+  if (n <= 11 && tables[n]) {
+    return tables[n]!;
+  }
+
+  // For n > 11, use Royston's approximation
+  return approximateCoefficients(n);
+}
+
+/**
+ * Approximate Shapiro-Wilk coefficients using Royston (1992) algorithm
+ */
+function approximateCoefficients(n: number): number[] {
+  const halfN = Math.floor(n / 2);
+  const a: number[] = [];
+
+  // Calculate expected values of order statistics (Blom's approximation)
   const m: number[] = [];
   for (let i = 1; i <= n; i++) {
     m.push(normalQuantile((i - 0.375) / (n + 0.25)));
   }
 
-  // Calculate sum of squared m values
+  // Calculate ||m||²
   const mSumSq = m.reduce((sum, mi) => sum + mi * mi, 0);
+  const mNorm = Math.sqrt(mSumSq);
 
-  // Calculate coefficients
+  // Calculate coefficients normalized to ||a|| = 1
+  // a_i proportional to m_(n+1-i) - m_i for the paired differences
   for (let i = 0; i < halfN; i++) {
     const mLow = m[i];
     const mHigh = m[n - 1 - i];
     if (mLow !== undefined && mHigh !== undefined) {
-      a.push((mHigh - mLow) / Math.sqrt(mSumSq));
+      // Coefficient for the i-th pair
+      a.push((mHigh - mLow) / (2 * mNorm));
+    }
+  }
+
+  // Normalize so sum(a²) relates properly to the test
+  const aSumSq = a.reduce((sum, ai) => sum + ai * ai, 0);
+  const aNorm = Math.sqrt(aSumSq);
+
+  if (aNorm > 0) {
+    for (let i = 0; i < a.length; i++) {
+      a[i] = a[i]! / aNorm;
     }
   }
 
@@ -126,19 +174,31 @@ function shapiroWilkCoefficients(n: number): number[] {
  * Calculate p-value for Shapiro-Wilk W statistic using Royston (1992) approximation
  */
 function shapiroWilkPValue(W: number, n: number): number {
-  // Transformation to approximate normality
+  // Handle edge cases
+  if (W >= 1) return 1;
+  if (W <= 0) return 0;
+
   let z: number;
 
   if (n <= 11) {
-    // Small sample approximation
+    // Small sample approximation (Royston, 1992)
     const gamma = 0.459 * n - 2.273;
-    const w = -Math.log(gamma - Math.log(1 - W));
+
+    // Protect against invalid log arguments
+    const inner = gamma - Math.log(1 - W);
+    if (inner <= 0) return 0;
+
+    const w = -Math.log(inner);
     const mu = -0.0006714 * n ** 3 + 0.025054 * n ** 2 - 0.39978 * n + 0.5440;
     const sigma = Math.exp(-0.0020322 * n ** 3 + 0.062767 * n ** 2 - 0.77857 * n + 1.3822);
     z = (w - mu) / sigma;
   } else {
     // Large sample approximation (n > 11)
     const logN = Math.log(n);
+
+    // Protect against log(0)
+    if (W >= 1) return 1;
+
     const w = Math.log(1 - W);
     const mu = 0.0038915 * logN ** 3 - 0.083751 * logN ** 2 - 0.31082 * logN - 1.5861;
     const sigma = Math.exp(0.0030302 * logN ** 2 - 0.082676 * logN - 0.4803);

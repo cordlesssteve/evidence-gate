@@ -19,7 +19,8 @@ export {
 } from './core/welch-t-test.js';
 export { mannWhitneyU } from './core/mann-whitney.js';
 export { shapiroWilkTest } from './core/normality.js';
-export { detectOutliers } from './core/outliers.js';
+export { detectOutliers, detectOutliersIQR, detectOutliersCombined } from './core/outliers.js';
+export type { IQROutlierResult, CombinedOutlierResult } from './core/outliers.js';
 
 // Diagnostics
 export { runDiagnostics, getSampleDiagnostics } from './diagnostics/sample-quality.js';
