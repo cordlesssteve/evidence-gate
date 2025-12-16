@@ -476,9 +476,11 @@ evidence-gate/
 
 ---
 
-## Open Questions
+## Decisions Made (2025-12-16)
 
-1. **Dependency strategy:** Pure TypeScript vs optional simple-statistics wrapper?
-2. **Test framework:** Jest vs Vitest?
-3. **Package scope:** `@cordlesssteve/evidence-gate` vs unscoped `evidence-gate`?
-4. **Mann-Whitney priority:** Include in v0.1 or defer to v1.0?
+| Question | Decision | Notes |
+|----------|----------|-------|
+| Dependency strategy | **Wrap simple-statistics** | Battle-tested, has Mann-Whitney, less maintenance |
+| Test framework | **Vitest** | Faster, native TypeScript, simpler setup |
+| Package scope | **@cordlesssteve/evidence-gate** | Scoped to personal ecosystem |
+| Mann-Whitney | **Include in v0.1** | Completes diagnostic → action flow |
